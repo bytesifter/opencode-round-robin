@@ -6,7 +6,23 @@
 
 于是写了个插件 `opencode-round-robin`：每次请求随机选一个 provider，key 和端点一起换，429 自动熔断跳过，全部熔断时回退到 opencode 原生请求。附带按天用量统计和结构化日志。
 
-完整代码：[https://github.com/bytesifter/opencode-round-robin](https://github.com/bytesifter/opencode-round-robin)
+完整代码：[https://github.com/bytesifter/opencode-round-robin](https://github.com/bytesifter/opencode-round-robin)（本文基于 opencode v1.18.5）
+
+### 为什么不用 API 网关？
+
+opencode 没有内置多 key 轮询，其他 vibe coding agent（Cursor、Windsurf、Continue、Aider、Cline）也没有。能做多 key 轮询的方案对比：
+
+```
+API 网关方案 (new-api / one-api / LiteLLM):
+  opencode ──▶ 网关进程(独立服务+数据库+Web UI) ──▶ API
+  功能全,但太重: 额外进程,额外端口,额外维护
+
+插件方案 (opencode-round-robin):
+  opencode + 插件(monkey-patch fetch) ──▶ API
+  零额外进程,零数据库,零 Web UI,~740 行代码搞定
+```
+
+网关方案适合团队共享和精细管控。个人开发者只想多几个 key 轮着用，插件方案最轻：装上即用，不需要部署和维护额外服务。
 
 本文以这个插件为例，系统讲解 opencode 插件开发：从加载方式到 API 到踩坑，帮你从零写出一个能工作的插件。
 
@@ -638,7 +654,7 @@ bun install
 - **判断插件有没有加载**：插件注册的 `tool` 不会出现在 LLM 可用工具里 → 插件没加载
 - **查 opencode.log**：`~/.local/share/opencode/log/opencode.log`，搜 `WARN`/`ERROR`
 - **用 `client.app.log()` 打日志**：替代 `console.log`，opencode 会捕获并写入 opencode.log
-- **asar 挖掘**：opencode desktop 的逻辑在 `app.asar`（`~/.local\Programs\@opencode-aidesktop\resources\app.asar`），可用 PowerShell 读字节搜索字符串
+- **asar 挖掘**：opencode desktop 的逻辑在 `app.asar`（`~/.local/Programs/@opencode-aidesktop/resources/app.asar`），可用 PowerShell 读字节搜索字符串
 
 ## 十一、资源
 
