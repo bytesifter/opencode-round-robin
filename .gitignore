@@ -1,0 +1,12 @@
+# 编辑器
+.vscode/
+
+# 依赖
+node_modules/
+
+# 临时文件(AGENTS-project.md §5.2)
+temp/
+
+# 运行时产物
+*.log
+round-robin-stats.json
