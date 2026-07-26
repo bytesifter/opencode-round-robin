@@ -1,8 +1,8 @@
 # opencode-round-robin
 
-opencode 插件:对多个账号 API key 做**随机轮询**,附带按天用量统计与结构化请求日志。
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-与 `@thelioo/opencode-balancer` 的核心区别:主动随机轮询(每次请求换 provider,key 和端点一起换),而非被动失败重试;且不依赖 sqlite/TUI,体量极简。
+opencode 插件:对多个账号 API key 做**随机轮询**,附带按天用量统计与结构化请求日志。
 
 ## 功能
 
@@ -10,28 +10,23 @@ opencode 插件:对多个账号 API key 做**随机轮询**,附带按天用量�
 - **429 熔断**:某 provider 被限流后默认 60 秒不再选用,时长可配;全部熔断时 passthrough 回退到 opencode 原生请求
 - **用量统计**:通过 `event` hook 按天累计请求数与 token 消耗(input/output/reasoning/cache),内存累积 60 秒刷盘到 JSON
 - **图表查看**:注册 `roundrobin_stats` 工具,返回按天 ASCII 柱状图
-- **结构化日志**:按日轮转,含日志级别(INFO/WARN/ERROR)、业务上下文(session/model/mode/agent)、请求耗时;key 脱敏(仅记序号与末 4 位)
-- **自包含构建**:`dist/index.js` 内联 `@opencode-ai/plugin` 的 `tool()` 函数及 `zod`,运行时无需 `node_modules` 中存在 `@opencode-ai/plugin`,支持 npm 零配置分发
+- **结构化日志**:按日轮转,含日志级别(INFO/WARN/ERROR)、业务上下文(session/model/provider/mode/agent/duration)、请求耗时;key 脱敏(仅记序号与末 4 位)
+- **自包含构建**:`dist/index.js` 内联 `@opencode-ai/plugin` 的 `tool()` 函数及 `zod`,运行时无需 `node_modules` 中存在 `@opencode-ai/plugin`,零依赖分发
 
 ## 安装
 
-### 方式一:npm(发布后)
-
-在 `~/.config/opencode/opencode.jsonc` 的 `plugin` 数组中加入:
-
-```jsonc
-"plugin": [
-  ["opencode-round-robin", { "providers": ["volxc9208", "volxc5425", "vollqh5426"] }]
-]
+```bash
+git clone https://github.com/bytesifter/opencode-round-robin.git
+cd opencode-round-robin
+bun install
+bun run build
 ```
 
-### 方式二:本地路径(开发/未发布时)
-
-在 `~/.config/opencode/opencode.jsonc` 的 `plugin` 数组中用 `file:///` 路径声明:
+在 `~/.config/opencode/opencode.jsonc` 的 `plugin` 数组中用 `file:///` 指向你 clone 的路径:
 
 ```jsonc
 "plugin": [
-  ["file:///D:/code/projects/opencode-round-robin", { "providers": ["volxc9208", "volxc5425", "vollqh5426"] }]
+  ["file:///path/to/opencode-round-robin", { "providers": ["account-a", "account-b", "account-c"] }]
 ]
 ```
 
@@ -61,15 +56,15 @@ opencode 插件:对多个账号 API key 做**随机轮询**,附带按天用量�
 
 ## 配置示例
 
-以火山方舟 3 个 coding 账号 + 1 个 plan 账号为例。先在 `provider` 里按"每个账号一个 provider"配好:
+以 3 个同端点账号为例。先在 `provider` 里按"每个账号一个 provider"配好:
 
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "volxc9208/glm-5.2",            // 引用任一 coding provider 即可,插件按 URL 轮询覆盖 key
+  "model": "account-a/glm-5.2",
   "provider": {
-    "volxc9208": {
-      "name": "volxc9208",
+    "account-a": {
+      "name": "account-a",
       "npm": "@ai-sdk/openai-compatible",
       "models": { "glm-5.2": { "name": "glm-5.2" } },
       "options": {
@@ -77,8 +72,8 @@ opencode 插件:对多个账号 API key 做**随机轮询**,附带按天用量�
         "baseURL": "https://ark.cn-beijing.volces.com/api/coding/v3"
       }
     },
-    "volxc5425": {
-      "name": "volxc5425",
+    "account-b": {
+      "name": "account-b",
       "npm": "@ai-sdk/openai-compatible",
       "models": { "glm-5.2": { "name": "glm-5.2" } },
       "options": {
@@ -86,8 +81,8 @@ opencode 插件:对多个账号 API key 做**随机轮询**,附带按天用量�
         "baseURL": "https://ark.cn-beijing.volces.com/api/coding/v3"
       }
     },
-    "vollqh5426": {
-      "name": "vollqh5426",
+    "account-c": {
+      "name": "account-c",
       "npm": "@ai-sdk/openai-compatible",
       "models": { "glm-5.2": { "name": "glm-5.2" } },
       "options": {
@@ -97,15 +92,15 @@ opencode 插件:对多个账号 API key 做**随机轮询**,附带按天用量�
     }
   },
   "plugin": [
-    ["file:///D:/code/projects/opencode-round-robin", {
-      "providers": ["volxc9208", "volxc5425", "vollqh5426"],
+    ["file:///path/to/opencode-round-robin", {
+      "providers": ["account-a", "account-b", "account-c"],
       "cooldownMs": 60000
     }]
   ]
 }
 ```
 
-插件启动后:3 个 coding 账号同 `baseURL`,自动聚为一组随机轮询;`model` 引用 `volxc9208` 只是让 opencode 知道用哪个 `baseURL` 发请求,实际用哪个账号的 key 由插件随机决定。
+`model` 指向的 provider 决定 opencode 发出的初始请求 URL,插件拦截 fetch 后用 `pool.findBaseURL()` 识别该请求归属,然后替换为随机选中 provider 的 URL + key。所有 provider 在一个扁平池中随机轮询,不按 baseURL 分组。
 
 ## 工具用法
 
@@ -125,30 +120,16 @@ round-robin 近 7 天统计
 ## 日志示例
 
 ```
-2026-07-26 18:51:40.123 INFO  fetch provider=volxc9208 key=#0(..2898) status=200 duration=342ms
-2026-07-26 18:52:08.456 INFO  usage in=4556 out=2182 reasoning=0 cacheR=312384 cacheW=0 cost=0.0021 session=a3f2 model=glm-5.2 provider=volxc9208 mode=code agent=opencode duration=1283ms
-2026-07-26 18:53:00.789 WARN  cooldown provider=volxc5425 key=#1(..2a5b) 60000ms
+2026-07-26 18:51:40.123 INFO  fetch provider=account-a key=#0(..2898) status=200 duration=342ms
+2026-07-26 18:52:08.456 INFO  usage in=4556 out=2182 reasoning=0 cacheR=312384 cacheW=0 cost=0.0021 session=a3f2 model=glm-5.2 provider=account-a mode=code agent=opencode duration=1283ms
+2026-07-26 18:53:00.789 WARN  cooldown provider=account-b key=#1(..2a5b) 60000ms
 ```
 
-- 第一行(fetch 层):用了 volxc9208 账号的 key#0,HTTP 200,耗时 342ms
-- 第二行(event 层):本次消息 token 用量,含 session/model/mode/agent/duration 等业务上下文
-- 第三行(429):volxc5425 被限流,冷却 60 秒
+- 第一行(fetch 层):用了 account-a 账号的 key#0,HTTP 200,耗时 342ms
+- 第二行(event 层):本次消息 token 用量,含 session/model/provider/mode/agent/duration 等业务上下文
+- 第三行(429):account-b 被限流,冷却 60 秒
 
 日志按日轮转,文件名 `round-robin-YYYY-MM-DD.log`。配置 `logPath` 可强制单文件模式(禁用轮转)。
-
-## 与 balancer 的区别
-
-| 维度 | balancer(已停用) | round-robin |
-|------|-------------------|-------------|
-| 策略 | 被动失败重试 | 主动随机轮询 |
-| key 利用 | 1 个干活,其余备份 | 全部均匀使用 |
-| 配置 | 独立账号管理 | 复用 opencode provider,只列 `providers` |
-| 持久化 | sqlite 五张表 | 单 JSON 文件 |
-| 界面 | solid-js TUI dashboard | 工具返回 ASCII 图表 |
-| 失败处理 | 重试下一个 key | 标 cooldown,不重试 |
-| 日志 | 无 | 结构化(级别/业务上下文/按日轮转) |
-| 构建 | - | 自包含(无运行时依赖) |
-| 体量 | 大 | 极简(~740 行) |
 
 ## 开发
 
@@ -160,3 +141,11 @@ bun x tsc --noEmit   # 类型检查
 ```
 
 技术栈:Bun + TypeScript;`bun build` 打包为 Node.js ESM(`--target node`),`main` 指向 `./dist/index.js`。`@opencode-ai/plugin` 在 `devDependencies`(编译期类型),运行时已内联到 `dist/index.js`。
+
+## 贡献
+
+欢迎提 Issue 或 Pull Request。
+
+## 许可证
+
+[Apache License 2.0](LICENSE)。

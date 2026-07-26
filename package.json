@@ -1,6 +1,7 @@
 {
   "name": "opencode-round-robin",
   "version": "0.1.0",
+  "license": "Apache-2.0",
   "description": "opencode 插件:多服务商多账号 API key 随机轮询、用量统计、请求日志",
   "type": "module",
   "main": "./dist/index.js",
