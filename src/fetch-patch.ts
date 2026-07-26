@@ -30,8 +30,8 @@ export function patchFetch(pools: KeyPool[], callbacks?: FetchPatchCallbacks): (
   const patchedFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = resolveUrl(input)
     const pool = matchPool(pools, url)
-    // 不匹配或单 key 透传:不改 headers,直接透传
-    if (!pool || pool.passthrough) {
+    // 不匹配:不改 headers,直接透传
+    if (!pool) {
       return origFetch(input, init)
     }
     const key = pool.next()

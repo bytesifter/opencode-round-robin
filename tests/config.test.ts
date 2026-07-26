@@ -52,7 +52,6 @@ test("buildPoolsFromProviders: 按 baseURL 分组", () => {
   expect(pools).toHaveLength(1)
   expect(pools[0].match).toBe("https://x/coding/v3")
   expect(pools[0].keys).toEqual(["k1", "k3", "k2"])
-  expect(pools[0].passthrough).toBe(false)
 })
 
 test("buildPoolsFromProviders: 不同 baseURL 分到不同 pool", () => {
@@ -66,12 +65,10 @@ test("buildPoolsFromProviders: 不同 baseURL 分到不同 pool", () => {
   const plan = pools.find((p) => p.match.includes("plan"))!
   expect(coding.keys).toHaveLength(3)
   expect(plan.keys).toHaveLength(1)
-  expect(plan.passthrough).toBe(true)
 })
 
-test("buildPoolsFromProviders: 单 key 组透传", () => {
+test("buildPoolsFromProviders: 单 key 组正常创建", () => {
   const pools = buildPoolsFromProviders(fakeConfig, ["volxc9208-agentplan"], 60000)
-  expect(pools[0].passthrough).toBe(true)
   expect(pools[0].keys).toEqual(["k4"])
 })
 
@@ -84,7 +81,6 @@ test("buildPoolsFromProviders: key 去重", () => {
   }
   const pools = buildPoolsFromProviders(cfg, ["a", "b"], 60000)
   expect(pools[0].keys).toEqual(["same"])
-  expect(pools[0].passthrough).toBe(true)
 })
 
 test("buildPoolsFromProviders: key->账号名映射", () => {

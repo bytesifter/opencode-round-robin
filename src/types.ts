@@ -24,8 +24,6 @@ export interface ParsedPool {
   keys: string[]
   /** 该 pool 的有效冷却时长(毫秒) */
   cooldownMs: number
-  /** 单 key 时为 true,匹配该 pool 的请求透传不拦截 */
-  passthrough: boolean
   /** key -> provider 名(账号名)映射,用于日志显示账号 */
   keyAccounts: Map<string, string>
 }

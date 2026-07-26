@@ -93,6 +93,5 @@ export function buildPoolsFromProviders(
     keys: g.keys,
     keyAccounts: g.keyAccounts,
     cooldownMs,
-    passthrough: g.keys.length === 1,
   }))
 }

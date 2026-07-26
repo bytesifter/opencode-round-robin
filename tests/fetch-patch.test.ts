@@ -19,7 +19,6 @@ function makePool(keys: string[], match = "https://x.example/api"): KeyPool {
     match,
     keys,
     cooldownMs: 60000,
-    passthrough: keys.length === 1,
     keyAccounts,
   }
   return new KeyPool(p)
@@ -68,10 +67,10 @@ test("429 响应触发 markCooldown", async () => {
   expect(anyCooling).toBe(true)
 })
 
-test("单 key pool 透传不拦截", async () => {
-  let receivedAuth: string | null = "sentinel"
+test("单 key pool 拦截并设置 Authorization", async () => {
+  let receivedAuth: string | null = null
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
-    receivedAuth = init?.headers ? new Headers(init.headers).get("Authorization") : null
+    receivedAuth = new Headers(init?.headers).get("Authorization")
     return new Response("ok", { status: 200 })
   }) as unknown as typeof globalThis.fetch
 
@@ -79,8 +78,7 @@ test("单 key pool 透传不拦截", async () => {
   await fetch("https://x.example/api/chat", {})
   unpatch()
 
-  // 透传:不设置 Authorization
-  expect(receivedAuth).toBeNull()
+  expect(receivedAuth!).toBe("Bearer only")
 })
 
 test("onPick 与 onResponse 回调触发", async () => {

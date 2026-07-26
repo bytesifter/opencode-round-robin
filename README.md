@@ -56,7 +56,6 @@ opencode 插件:对同一服务商的多个账号 API key 做**随机轮询**,�
 规则:
 - 插件通过 `config` hook 读取 `opencode.jsonc` 中 `providers` 列表对应的 provider,按 `baseURL` 自动分组构建 key 池
 - 同一 `baseURL` 下的多个账号聚为一组随机轮询;不同 `baseURL`(如 coding/plan 端点)自动分到不同组
-- 某组去重后仅 1 个 key -> 该组透传,不拦截
 - 模型一致性由配置者保证(插件不校验,只按 `baseURL` 分组)
 
 ## 配置示例

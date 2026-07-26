@@ -12398,8 +12398,7 @@ function buildPoolsFromProviders(config2, providers, cooldownMs) {
     match: baseURL,
     keys: g.keys,
     keyAccounts: g.keyAccounts,
-    cooldownMs,
-    passthrough: g.keys.length === 1
+    cooldownMs
   }));
 }
 
@@ -12407,7 +12406,6 @@ function buildPoolsFromProviders(config2, providers, cooldownMs) {
 class KeyPool {
   match;
   name;
-  passthrough;
   keys;
   cooldownMs;
   keyAccounts;
@@ -12417,12 +12415,9 @@ class KeyPool {
     this.name = safeHost(pool.match);
     this.keys = pool.keys;
     this.cooldownMs = pool.cooldownMs;
-    this.passthrough = pool.passthrough;
     this.keyAccounts = pool.keyAccounts;
   }
   next() {
-    if (this.passthrough)
-      return this.keys[0];
     const now = Date.now();
     const available = this.keys.filter((k) => !this.isCoolingDown(k, now));
     const candidates = available.length > 0 ? available : this.keys;
@@ -12464,7 +12459,7 @@ function patchFetch(pools, callbacks) {
   const patchedFetch = async (input, init) => {
     const url2 = resolveUrl(input);
     const pool = matchPool(pools, url2);
-    if (!pool || pool.passthrough) {
+    if (!pool) {
       return origFetch(input, init);
     }
     const key = pool.next();

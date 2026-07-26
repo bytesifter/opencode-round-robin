@@ -19,8 +19,6 @@ export class KeyPool {
   readonly match: string
   /** 池名称(用于日志) */
   readonly name: string
-  /** 单 key 时为 true,匹配该 pool 的请求透传不拦截 */
-  readonly passthrough: boolean
   private readonly keys: string[]
   readonly cooldownMs: number
   private readonly keyAccounts: Map<string, string>
@@ -31,7 +29,6 @@ export class KeyPool {
     this.name = safeHost(pool.match)
     this.keys = pool.keys
     this.cooldownMs = pool.cooldownMs
-    this.passthrough = pool.passthrough
     this.keyAccounts = pool.keyAccounts
   }
 
@@ -41,7 +38,6 @@ export class KeyPool {
    * @returns 选中的 API key
    */
   next(): string {
-    if (this.passthrough) return this.keys[0]
     const now = Date.now()
     const available = this.keys.filter((k) => !this.isCoolingDown(k, now))
     // 全部冷却时兜底:忽略 cooldown,避免无 key 可用而阻塞

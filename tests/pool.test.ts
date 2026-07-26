@@ -9,7 +9,6 @@ function makePool(keys: string[], cooldownMs = 60000): KeyPool {
     match: "https://x.example/api",
     keys,
     cooldownMs,
-    passthrough: keys.length === 1,
     keyAccounts,
   }
   return new KeyPool(pool)
@@ -63,9 +62,8 @@ test("全部冷却兜底随机返回", () => {
   }
 })
 
-test("单 key pool passthrough 为 true 且 next 返回唯一 key", () => {
+test("单 key pool next() 返回唯一 key", () => {
   const pool = makePool(["only"])
-  expect(pool.passthrough).toBe(true)
   expect(pool.next()).toBe("only")
 })
 
