@@ -21,4 +21,4 @@
 
 - [x] 3.1 确认 README 无残留 volxc/账号名
 - [x] 3.2 确认 LICENSE 文件存在且 GitHub 能识别
-- [ ] 3.3 git add + commit + push
+- [x] 3.3 git add + commit + push
