@@ -1,8 +1,14 @@
-# opencode 插件开发指南
+# opencode 插件开发指南：从 429 限流到多 Key 自动轮询
 
-> 基于 `@opencode-ai/plugin@1.18.5` / opencode 2026-07  
-> 类型来源：`node_modules/@opencode-ai/plugin/dist/index.d.ts`、`tool.d.ts`  
-> 文档来源：[opencode.ai/docs/plugins](https://opencode.ai/docs/plugins)、[/docs/config](https://opencode.ai/docs/config/)、[/docs/sdk](https://opencode.ai/docs/sdk/)
+## 背景
+
+日常用 opencode 写代码，单个 API Key 频繁触发 429 限流。手头有 6 个高级版账号（coding + plan 端点），但 opencode 的 `opencode.jsonc` 只能配一个 provider，切换账号要手动改配置。
+
+于是写了个插件 `opencode-round-robin`：每次请求随机选一个 provider，key 和端点一起换，429 自动熔断跳过，全部熔断时回退到 opencode 原生请求。附带按天用量统计和结构化日志。
+
+完整代码：[https://github.com/bytesifter/opencode-round-robin](https://github.com/bytesifter/opencode-round-robin)
+
+本文以这个插件为例，系统讲解 opencode 插件开发：从加载方式到 API 到踩坑，帮你从零写出一个能工作的插件。
 
 ## 一、opencode 插件能做什么
 
@@ -53,7 +59,7 @@ opencode 启动时用 Bun 安装，缓存在 `~/.cache/opencode/node_modules/`�
 ```jsonc
 {
   "plugin": [
-    ["opencode-round-robin", { "providers": ["volxc9208", "volxc5425"] }]
+    ["opencode-round-robin", { "providers": ["account1", "account2"] }]
   ]
 }
 ```
@@ -442,7 +448,7 @@ await input.client.app.log({
 
 ## 九、实战：写一个 key 轮询插件
 
-本章用一个迷你版 key 轮询插件串联前八章。完整实现见 [opencode-round-robin](https://github.com/) 项目的 `src/`，此处为教学简化。
+本章用一个迷你版 key 轮询插件串联前八章。以下为教学简化版（仅替换 Authorization 头，不含 URL 替换、熔断 passthrough 等完整功能），完整实现见 [opencode-round-robin](https://github.com/bytesifter/opencode-round-robin) 项目的 `src/`。
 
 ### 9.1 目标
 
@@ -456,7 +462,7 @@ await input.client.app.log({
 const server: Plugin = async (input, options) => {
   return {
     config: async (config) => {
-      // options.providers 是账号名列表，如 ["volxc9208", "volxc5425"]
+      // options.providers 是账号名列表，如 ["account1", "account2"]
       const providers = options?.providers as string[]
       const keys: string[] = []
       for (const name of providers) {
@@ -485,7 +491,7 @@ function patchFetch(keys: string[]) {
   globalThis.fetch = async (input, init) => {
     const url = typeof input === "string" ? input : input.url
     // 仅拦截匹配 pool 的请求
-    if (!url.startsWith("https://ark.cn-beijing.volces.com/api/coding/v3")) {
+    if (!url.startsWith("https://api.example.com/coding/v3")) {
       return origFetch(input, init)
     }
     // 随机选 key
@@ -657,3 +663,9 @@ bun install
 - `superpowers` — Claude Code 插件格式（`@opencode-ai/plugin` 零依赖，走 git URL 安装）
 
 这两个同类插件（anthropic-auth、autognosis）都把 `@opencode-ai/plugin` 放在 `devDependencies`，runtime `dependencies` 为空或仅含第三方库——这是编写 opencode server 插件的最佳实践。
+
+### 11.4 本文项目
+
+完整代码和文档：[https://github.com/bytesifter/opencode-round-robin](https://github.com/bytesifter/opencode-round-robin)
+
+如果对你有帮助，欢迎 Star 支持。
