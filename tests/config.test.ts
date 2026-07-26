@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test"
-import { parseOptions, buildPoolsFromProviders } from "../src/config"
+import { parseOptions, collectProviders } from "../src/config"
 
 const fakeConfig = {
   provider: {
@@ -47,58 +47,36 @@ test("parseOptions: logDir 可选,与 logPath 独立", () => {
   expect(r3.logPath).toBe("/p.log")
 })
 
-test("buildPoolsFromProviders: 按 baseURL 分组", () => {
-  const pools = buildPoolsFromProviders(fakeConfig, ["volxc9208", "volxc5425", "vollqh5426"], 60000)
-  expect(pools).toHaveLength(1)
-  expect(pools[0].match).toBe("https://x/coding/v3")
-  expect(pools[0].keys).toEqual(["k1", "k3", "k2"])
+test("collectProviders: 返回扁平列表(不分组)", () => {
+  const entries = collectProviders(fakeConfig, ["volxc9208", "volxc5425", "vollqh5426", "volxc9208-agentplan"])
+  expect(entries).toHaveLength(4)
+  expect(entries[0]).toEqual({ key: "k1", baseURL: "https://x/coding/v3", account: "volxc9208" })
+  expect(entries[3]).toEqual({ key: "k4", baseURL: "https://x/plan/v3", account: "volxc9208-agentplan" })
 })
 
-test("buildPoolsFromProviders: 不同 baseURL 分到不同 pool", () => {
-  const pools = buildPoolsFromProviders(
-    fakeConfig,
-    ["volxc9208", "volxc5425", "vollqh5426", "volxc9208-agentplan"],
-    60000,
-  )
-  expect(pools).toHaveLength(2)
-  const coding = pools.find((p) => p.match.includes("coding"))!
-  const plan = pools.find((p) => p.match.includes("plan"))!
-  expect(coding.keys).toHaveLength(3)
-  expect(plan.keys).toHaveLength(1)
-})
-
-test("buildPoolsFromProviders: 单 key 组正常创建", () => {
-  const pools = buildPoolsFromProviders(fakeConfig, ["volxc9208-agentplan"], 60000)
-  expect(pools[0].keys).toEqual(["k4"])
-})
-
-test("buildPoolsFromProviders: key 去重", () => {
+test("collectProviders: key 去重", () => {
   const cfg = {
     provider: {
       a: { options: { apiKey: "same", baseURL: "https://x" } },
-      b: { options: { apiKey: "same", baseURL: "https://x" } },
+      b: { options: { apiKey: "same", baseURL: "https://y" } },
     },
   }
-  const pools = buildPoolsFromProviders(cfg, ["a", "b"], 60000)
-  expect(pools[0].keys).toEqual(["same"])
+  const entries = collectProviders(cfg, ["a", "b"])
+  expect(entries).toHaveLength(1)
+  expect(entries[0].key).toBe("same")
+  expect(entries[0].account).toBe("a")
 })
 
-test("buildPoolsFromProviders: key->账号名映射", () => {
-  const pools = buildPoolsFromProviders(fakeConfig, ["volxc9208", "volxc5425"], 60000)
-  expect(pools[0].keyAccounts.get("k1")).toBe("volxc9208")
-  expect(pools[0].keyAccounts.get("k3")).toBe("volxc5425")
+test("collectProviders: provider 名不存在抛错", () => {
+  expect(() => collectProviders(fakeConfig, ["nope"])).toThrow(/不存在/)
 })
 
-test("buildPoolsFromProviders: provider 名不存在抛错", () => {
-  expect(() => buildPoolsFromProviders(fakeConfig, ["nope"], 60000)).toThrow(/不存在/)
-})
-
-test("buildPoolsFromProviders: 缺 baseURL 抛错", () => {
+test("collectProviders: 缺 baseURL 抛错", () => {
   const cfg = { provider: { a: { options: { apiKey: "k" } } } }
-  expect(() => buildPoolsFromProviders(cfg, ["a"], 60000)).toThrow(/baseURL/)
+  expect(() => collectProviders(cfg, ["a"])).toThrow(/baseURL/)
 })
 
-test("buildPoolsFromProviders: 缺 apiKey 抛错", () => {
+test("collectProviders: 缺 apiKey 抛错", () => {
   const cfg = { provider: { a: { options: { baseURL: "https://x" } } } }
-  expect(() => buildPoolsFromProviders(cfg, ["a"], 60000)).toThrow(/apiKey/)
+  expect(() => collectProviders(cfg, ["a"])).toThrow(/apiKey/)
 })

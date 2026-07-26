@@ -15,17 +15,15 @@ export interface ParsedOptions {
 }
 
 /**
- * 解析后的 key 池(由 buildPoolsFromProviders 按 baseURL 分组构建)。
+ * 单个 provider 条目:key + baseURL + 账号名,作为一个整体参与随机轮询。
  */
-export interface ParsedPool {
-  /** URL 前缀匹配串(即该组的 baseURL) */
-  match: string
-  /** 去重后的 key 列表 */
-  keys: string[]
-  /** 该 pool 的有效冷却时长(毫秒) */
-  cooldownMs: number
-  /** key -> provider 名(账号名)映射,用于日志显示账号 */
-  keyAccounts: Map<string, string>
+export interface ProviderEntry {
+  /** API key */
+  key: string
+  /** 该 provider 的 baseURL */
+  baseURL: string
+  /** 账号名(provider 名,用于日志) */
+  account: string
 }
 
 /**
@@ -56,14 +54,11 @@ export type StatsStore = Record<string, DayStats>
 /** 日志级别 */
 export type LogLevel = "INFO" | "WARN" | "ERROR"
 
-/** 日志模式:simple(单文件)或 rotation(按日轮转) */
-export type LogMode = "simple" | "rotation"
-
 /**
  * event 层业务上下文(从 message.updated 事件提取)。
  */
 export interface EventContext {
-  /** sessionID 截短为前 4 位(隐私保护) */
+  /** sessionID 截短为前 8 位(隐私保护) */
   sessionID?: string
   /** 模型 ID(如 glm-5.2) */
   modelID?: string

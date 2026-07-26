@@ -1,13 +1,13 @@
 # opencode-round-robin
 
-opencode 插件:对同一服务商的多个账号 API key 做**随机轮询**,附带按天用量统计与结构化请求日志。
+opencode 插件:对多个账号 API key 做**随机轮询**,附带按天用量统计与结构化请求日志。
 
-与 `@thelioo/opencode-balancer` 的核心区别:主动随机轮询(每次请求换 key),而非被动失败重试;且不依赖 sqlite/TUI,体量极简。
+与 `@thelioo/opencode-balancer` 的核心区别:主动随机轮询(每次请求换 provider,key 和端点一起换),而非被动失败重试;且不依赖 sqlite/TUI,体量极简。
 
 ## 功能
 
-- **随机轮询**:声明 `providers`(账号名列表),插件通过 `config` hook 读 opencode 的 provider 配置,按 `baseURL` 自动分组,每组随机选 key--**复用 provider 已有的 baseURL+apiKey,无需重复配置**
-- **429 cooldown**:某 key 被限流后默认 60 秒不再选用,时长可配;全部冷却时兜底随机
+- **随机轮询**:声明 `providers`(账号名列表),插件通过 `config` hook 读 opencode 的 provider 配置,收集所有 key + baseURL,每次请求随机选一个 provider,同时替换 Authorization 头和请求 URL--**所有 provider 都参与轮询,不分组**
+- **429 熔断**:某 provider 被限流后默认 60 秒不再选用,时长可配;全部熔断时 passthrough 回退到 opencode 原生请求
 - **用量统计**:通过 `event` hook 按天累计请求数与 token 消耗(input/output/reasoning/cache),内存累积 60 秒刷盘到 JSON
 - **图表查看**:注册 `roundrobin_stats` 工具,返回按天 ASCII 柱状图
 - **结构化日志**:按日轮转,含日志级别(INFO/WARN/ERROR)、业务上下文(session/model/mode/agent)、请求耗时;key 脱敏(仅记序号与末 4 位)
@@ -54,9 +54,10 @@ opencode 插件:对同一服务商的多个账号 API key 做**随机轮询**,�
 日志模式优先级:`logPath > logDir > 默认(轮转)`。配置 `logPath` 时强制单文件模式并忽略 `logDir`;不配 `logPath` 时启用按日轮转,目录为 `logDir` 或默认路径。
 
 规则:
-- 插件通过 `config` hook 读取 `opencode.jsonc` 中 `providers` 列表对应的 provider,按 `baseURL` 自动分组构建 key 池
-- 同一 `baseURL` 下的多个账号聚为一组随机轮询;不同 `baseURL`(如 coding/plan 端点)自动分到不同组
-- 模型一致性由配置者保证(插件不校验,只按 `baseURL` 分组)
+- 插件通过 `config` hook 读取 `opencode.jsonc` 中 `providers` 列表对应的 provider,收集所有 key + baseURL 形成扁平列表
+- 每次请求随机选一个 provider,同时替换 Authorization 头和请求 URL(key 和端点配对,不会错配)
+- 全部 provider 熔断(429)时 passthrough 回退到 opencode 原生请求
+- key 去重(相同 key 只保留第一个 provider)
 
 ## 配置示例
 

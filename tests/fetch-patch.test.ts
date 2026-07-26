@@ -1,7 +1,7 @@
 import { test, expect, beforeEach, afterEach } from "bun:test"
 import { patchFetch } from "../src/fetch-patch"
-import { KeyPool } from "../src/pool"
-import type { ParsedPool } from "../src/types"
+import { ProviderPool } from "../src/pool"
+import type { ProviderEntry } from "../src/types"
 
 let origFetch: typeof globalThis.fetch
 
@@ -12,89 +12,125 @@ afterEach(() => {
   globalThis.fetch = origFetch
 })
 
-function makePool(keys: string[], match = "https://x.example/api"): KeyPool {
-  const keyAccounts = new Map<string, string>()
-  keys.forEach((k, i) => keyAccounts.set(k, `account${i}`))
-  const p: ParsedPool = {
-    match,
-    keys,
-    cooldownMs: 60000,
-    keyAccounts,
-  }
-  return new KeyPool(p)
+function makePool(entries: ProviderEntry[], cooldownMs = 60000): ProviderPool {
+  return new ProviderPool(entries, cooldownMs)
 }
 
-test("URL 匹配 pool 注入 Authorization", async () => {
+const codingEntries: ProviderEntry[] = [
+  { key: "k1", baseURL: "https://x.example/coding/v3", account: "account1" },
+  { key: "k2", baseURL: "https://x.example/coding/v3", account: "account2" },
+]
+
+const mixedEntries: ProviderEntry[] = [
+  { key: "k1", baseURL: "https://x.example/coding/v3", account: "account1" },
+  { key: "k2", baseURL: "https://x.example/plan/v3", account: "account2" },
+]
+
+test("URL 匹配:替换 Authorization 和 URL", async () => {
+  let receivedUrl: string | null = null
   let receivedAuth: string | null = null
-  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    receivedUrl = typeof input === "string" ? input : input.toString()
     receivedAuth = new Headers(init?.headers).get("Authorization")
     return new Response("ok", { status: 200 })
   }) as unknown as typeof globalThis.fetch
 
-  const unpatch = patchFetch([makePool(["k1", "k2"])])
-  await fetch("https://x.example/api/chat", {})
+  const unpatch = patchFetch(makePool(codingEntries))
+  await fetch("https://x.example/coding/v3/chat/completions", {})
   unpatch()
 
   expect(receivedAuth).toMatch(/^Bearer (k1|k2)$/)
+  expect(receivedUrl).toMatch(/^https:\/\/x\.example\/coding\/v3\/chat\/completions$/)
 })
 
-test("URL 不匹配透传不改 headers", async () => {
+test("跨端点:coding 请求可能被路由到 plan baseURL", async () => {
+  let receivedUrl = ""
+  let receivedAuth = ""
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    receivedUrl = typeof input === "string" ? input : input.toString()
+    receivedAuth = new Headers(init?.headers).get("Authorization") ?? ""
+    return new Response("ok", { status: 200 })
+  }) as unknown as typeof globalThis.fetch
+
+  const urls: string[] = []
+  const keys: string[] = []
+  const unpatch = patchFetch(makePool(mixedEntries), {
+    onResponse: (_pool, entry, _status, _duration) => {
+      urls.push(entry.baseURL)
+      keys.push(entry.key)
+    },
+  })
+  for (let i = 0; i < 50; i++) {
+    await fetch("https://x.example/coding/v3/chat/completions", {})
+  }
+  unpatch()
+
+  // 两种 baseURL 都应出现
+  expect(urls.some((u) => u.includes("coding"))).toBe(true)
+  expect(urls.some((u) => u.includes("plan"))).toBe(true)
+  // 请求 URL 应与选中的 baseURL 匹配
+  expect(keys).toContain("k1")
+  expect(keys).toContain("k2")
+})
+
+test("URL 不匹配任何 baseURL:passthrough", async () => {
+  let receivedUrl = ""
+  let receivedAuth: string | null = "sentinel"
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    receivedUrl = typeof input === "string" ? input : input.toString()
+    receivedAuth = init?.headers ? new Headers(init.headers).get("Authorization") : null
+    return new Response("ok", { status: 200 })
+  }) as unknown as typeof globalThis.fetch
+
+  const unpatch = patchFetch(makePool(codingEntries))
+  await fetch("https://other.example/chat", {})
+  unpatch()
+
+  expect(receivedUrl).toBe("https://other.example/chat")
+  expect(receivedAuth).toBeNull()
+})
+
+test("全部熔断:passthrough 原始请求", async () => {
   let receivedAuth: string | null = "sentinel"
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
     receivedAuth = init?.headers ? new Headers(init.headers).get("Authorization") : null
     return new Response("ok", { status: 200 })
   }) as unknown as typeof globalThis.fetch
 
-  const unpatch = patchFetch([makePool(["k1", "k2"], "https://x.example/api")])
-  await fetch("https://other.example/chat", {})
+  const pool = makePool(codingEntries)
+  pool.markCooldown("k1")
+  pool.markCooldown("k2")
+  const unpatch = patchFetch(pool)
+  await fetch("https://x.example/coding/v3/chat/completions", {})
   unpatch()
 
+  // passthrough:不设 Authorization
   expect(receivedAuth).toBeNull()
 })
 
 test("429 响应触发 markCooldown", async () => {
-  const pool = makePool(["k1", "k2", "k3"])
+  const pool = makePool(codingEntries)
   globalThis.fetch = (async () => new Response("rate limited", { status: 429 })) as unknown as typeof globalThis.fetch
 
-  const unpatch = patchFetch([pool])
-  // 50 次 429,3 个 key,必然有 key 被标记冷却
+  const unpatch = patchFetch(pool)
   for (let i = 0; i < 50; i++) {
-    await fetch("https://x.example/api/chat", {})
+    await fetch("https://x.example/coding/v3/chat/completions", {})
   }
   unpatch()
 
-  const anyCooling = pool.isCoolingDown("k1") || pool.isCoolingDown("k2") || pool.isCoolingDown("k3")
-  expect(anyCooling).toBe(true)
+  expect(pool.isCoolingDown("k1") || pool.isCoolingDown("k2")).toBe(true)
 })
 
-test("单 key pool 拦截并设置 Authorization", async () => {
-  let receivedAuth: string | null = null
-  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
-    receivedAuth = new Headers(init?.headers).get("Authorization")
-    return new Response("ok", { status: 200 })
-  }) as unknown as typeof globalThis.fetch
-
-  const unpatch = patchFetch([makePool(["only"])])
-  await fetch("https://x.example/api/chat", {})
-  unpatch()
-
-  expect(receivedAuth!).toBe("Bearer only")
-})
-
-test("onPick 与 onResponse 回调触发", async () => {
+test("onResponse 回调触发", async () => {
   globalThis.fetch = (async () => new Response("ok", { status: 200 })) as unknown as typeof globalThis.fetch
 
-  const picks: string[] = []
   const statuses: number[] = []
-  const unpatch = patchFetch([makePool(["k1", "k2"])], {
-    onPick: (_pool, key) => picks.push(key),
-    onResponse: (_pool, _key, status, _durationMs) => statuses.push(status),
+  const unpatch = patchFetch(makePool(codingEntries), {
+    onResponse: (_pool, _entry, status, _duration) => statuses.push(status),
   })
-  await fetch("https://x.example/api/chat", {})
+  await fetch("https://x.example/coding/v3/chat/completions", {})
   unpatch()
 
-  expect(picks).toHaveLength(1)
-  expect(["k1", "k2"]).toContain(picks[0])
   expect(statuses).toEqual([200])
 })
 
@@ -102,7 +138,7 @@ test("unpatch 恢复原始 fetch", async () => {
   const mockFetch = (async () => new Response("mock")) as unknown as typeof globalThis.fetch
   globalThis.fetch = mockFetch
 
-  const unpatch = patchFetch([makePool(["k1", "k2"])])
+  const unpatch = patchFetch(makePool(codingEntries))
   unpatch()
 
   expect(globalThis.fetch).toBe(mockFetch)

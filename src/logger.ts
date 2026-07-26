@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync } from "node:fs"
 import { dirname, join } from "node:path"
-import type { LogLevel, LogMode, EventContext } from "./types"
+import type { LogLevel, EventContext } from "./types"
 
 /** token 用量(用于 event 层日志) */
 export interface UsageTokens {
@@ -19,7 +19,7 @@ export interface UsageTokens {
  * - key 脱敏:只记序号与末 4 位,禁止明文
  */
 export class Logger {
-  private readonly mode: LogMode
+  private readonly mode: "simple" | "rotation"
   private readonly dir: string
   private readonly fixedPath: string
 

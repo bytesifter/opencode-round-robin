@@ -12362,12 +12362,14 @@ function parseOptions(options) {
     logDir: typeof options.logDir === "string" ? options.logDir : undefined
   };
 }
-function buildPoolsFromProviders(config2, providers, cooldownMs) {
+function collectProviders(config2, providers) {
   const providerMap = config2.provider;
   if (!providerMap) {
     throw new Error("opencode-round-robin: Config.provider 为空");
   }
-  const collected = providers.map((name) => {
+  const seen = new Set;
+  const entries = [];
+  for (const name of providers) {
     const p = providerMap[name];
     if (!p) {
       throw new Error(`opencode-round-robin: provider "${name}" 不存在于 config.provider`);
@@ -12380,49 +12382,30 @@ function buildPoolsFromProviders(config2, providers, cooldownMs) {
     if (typeof apiKey !== "string" || apiKey.length === 0) {
       throw new Error(`opencode-round-robin: provider "${name}" 缺少 options.apiKey`);
     }
-    return { name, baseURL, apiKey };
-  });
-  const groups = new Map;
-  for (const { name, baseURL, apiKey } of collected) {
-    let g = groups.get(baseURL);
-    if (!g) {
-      g = { keys: [], keyAccounts: new Map };
-      groups.set(baseURL, g);
-    }
-    if (!g.keys.includes(apiKey)) {
-      g.keys.push(apiKey);
-      g.keyAccounts.set(apiKey, name);
+    if (!seen.has(apiKey)) {
+      seen.add(apiKey);
+      entries.push({ key: apiKey, baseURL, account: name });
     }
   }
-  return Array.from(groups.entries()).map(([baseURL, g]) => ({
-    match: baseURL,
-    keys: g.keys,
-    keyAccounts: g.keyAccounts,
-    cooldownMs
-  }));
+  return entries;
 }
 
 // src/pool.ts
-class KeyPool {
-  match;
-  name;
-  keys;
+class ProviderPool {
+  entries;
   cooldownMs;
-  keyAccounts;
   cooldowns = new Map;
-  constructor(pool) {
-    this.match = pool.match;
-    this.name = safeHost(pool.match);
-    this.keys = pool.keys;
-    this.cooldownMs = pool.cooldownMs;
-    this.keyAccounts = pool.keyAccounts;
+  constructor(entries, cooldownMs) {
+    this.entries = entries;
+    this.cooldownMs = cooldownMs;
   }
   next() {
     const now = Date.now();
-    const available = this.keys.filter((k) => !this.isCoolingDown(k, now));
-    const candidates = available.length > 0 ? available : this.keys;
-    const idx = Math.floor(Math.random() * candidates.length);
-    return candidates[idx];
+    const available = this.entries.filter((e) => !this.isCoolingDown(e.key, now));
+    if (available.length === 0)
+      return null;
+    const idx = Math.floor(Math.random() * available.length);
+    return available[idx];
   }
   markCooldown(key) {
     this.cooldowns.set(key, { until: Date.now() + this.cooldownMs });
@@ -12438,41 +12421,45 @@ class KeyPool {
     return true;
   }
   keyIndex(key) {
-    return this.keys.indexOf(key);
+    return this.entries.findIndex((e) => e.key === key);
   }
   accountName(key) {
-    return this.keyAccounts.get(key) ?? "unknown";
+    return this.entries.find((e) => e.key === key)?.account ?? "unknown";
   }
-}
-function safeHost(match) {
-  try {
-    return new URL(match).host;
-  } catch {
-    return match;
+  findBaseURL(url2) {
+    for (const e of this.entries) {
+      if (url2.startsWith(e.baseURL))
+        return e.baseURL;
+    }
+    return null;
   }
 }
 
 // src/fetch-patch.ts
 var HTTP_TOO_MANY_REQUESTS = 429;
-function patchFetch(pools, callbacks) {
+function patchFetch(pool, callbacks) {
   const origFetch = globalThis.fetch;
   const patchedFetch = async (input, init) => {
     const url2 = resolveUrl(input);
-    const pool = matchPool(pools, url2);
-    if (!pool) {
+    const originalBaseURL = pool.findBaseURL(url2);
+    if (!originalBaseURL) {
       return origFetch(input, init);
     }
-    const key = pool.next();
-    callbacks?.onPick?.(pool, key);
+    const entry = pool.next();
+    if (!entry) {
+      return origFetch(input, init);
+    }
+    const path = url2.slice(originalBaseURL.length);
+    const newUrl = entry.baseURL + path;
     const headers = new Headers(init?.headers);
-    headers.set("Authorization", `Bearer ${key}`);
+    headers.set("Authorization", `Bearer ${entry.key}`);
     const startMs = Date.now();
-    const response = await origFetch(input, { ...init, headers });
+    const response = await origFetch(newUrl, { ...init, headers });
     const durationMs = Date.now() - startMs;
     if (response.status === HTTP_TOO_MANY_REQUESTS) {
-      pool.markCooldown(key);
+      pool.markCooldown(entry.key);
     }
-    callbacks?.onResponse?.(pool, key, response.status, durationMs);
+    callbacks?.onResponse?.(pool, entry, response.status, durationMs);
     return response;
   };
   const origPreconnect = origFetch.preconnect;
@@ -12490,9 +12477,6 @@ function resolveUrl(input) {
   if (input instanceof URL)
     return input.href;
   return input.url;
-}
-function matchPool(pools, url2) {
-  return pools.find((p) => url2.startsWith(p.match));
 }
 
 // src/stats.ts
@@ -12702,7 +12686,7 @@ var DEFAULT_CHART_DAYS = 7;
 var HTTP_TOO_MANY_REQUESTS2 = 429;
 var globalStats = null;
 var globalLogger = null;
-var globalPools = [];
+var globalPool = null;
 var fetchPatched = false;
 var server = async (_input, options) => {
   const opts = parseOptions(options);
@@ -12720,15 +12704,15 @@ var server = async (_input, options) => {
     config: async (config2) => {
       if (fetchPatched)
         return;
-      const parsedPools = buildPoolsFromProviders(config2, opts.providers, opts.cooldownMs);
-      globalPools = parsedPools.map((p) => new KeyPool(p));
-      patchFetch(globalPools, {
-        onResponse: (pool, key, status, durationMs) => {
-          const idx = pool.keyIndex(key);
-          const account = pool.accountName(key);
-          globalLogger.logFetch(account, idx, tail(key), status, durationMs);
+      const entries = collectProviders(config2, opts.providers);
+      globalPool = new ProviderPool(entries, opts.cooldownMs);
+      patchFetch(globalPool, {
+        onResponse: (pool, entry, status, durationMs) => {
+          const idx = pool.keyIndex(entry.key);
+          const account = entry.account;
+          globalLogger.logFetch(account, idx, tail(entry.key), status, durationMs);
           if (status === HTTP_TOO_MANY_REQUESTS2) {
-            globalLogger.logCooldown(account, idx, tail(key), pool.cooldownMs);
+            globalLogger.logCooldown(account, idx, tail(entry.key), pool.cooldownMs);
           }
         }
       });
@@ -12742,7 +12726,7 @@ var server = async (_input, options) => {
         globalStats.recordUsage(info);
         if (info.tokens) {
           const ctx = {
-            sessionID: rawSession ? rawSession.slice(0, 4) : undefined,
+            sessionID: rawSession ? rawSession.slice(0, 8) : undefined,
             modelID: info.modelID,
             providerID: info.providerID,
             mode: info.mode,
