@@ -64,8 +64,8 @@ const server: Plugin = async (_input, options) => {
       const e = event as {
         type?: string
         properties?: {
-          sessionID?: string
           info?: UsageInput & {
+            sessionID?: string
             modelID?: string
             providerID?: string
             mode?: string
@@ -76,11 +76,10 @@ const server: Plugin = async (_input, options) => {
       }
       if (e.type === "message.updated" && e.properties?.info) {
         const info = e.properties.info
-        const rawSession = e.properties.sessionID
-        globalStats!.recordUsage(info)
-        if (info.tokens) {
+        const committed = globalStats!.recordUsage(info)
+        if (committed) {
           const ctx: EventContext = {
-            sessionID: rawSession ? rawSession.slice(0, 8) : undefined,
+            sessionID: info.sessionID ? info.sessionID.slice(0, 8) : undefined,
             modelID: info.modelID,
             providerID: info.providerID,
             mode: info.mode,

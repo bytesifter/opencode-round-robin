@@ -6,7 +6,9 @@ import { dirname } from "node:path"
  * Usage 输入:从 AssistantMessage 提取的字段(与 @opencode-ai/sdk 解耦,便于测试)。
  */
 export interface UsageInput {
+  id: string
   role?: string
+  finish?: string
   tokens?: {
     input: number
     output: number
@@ -31,6 +33,8 @@ export class StatsCollector {
   private readonly path: string
   private readonly flushMs: number
   private timer?: ReturnType<typeof setInterval>
+  private buffer: Map<string, UsageInput> = new Map()
+  private committed: Set<string> = new Set()
 
   constructor(
     path: string,
@@ -46,9 +50,23 @@ export class StatsCollector {
   }
 
   /**
-   * 累计一条 usage。无 tokens 字段时忽略(流式中途更新无 usage)。
+   * 累计一条 usage。按 id 幂等:同一 id 仅在首次出现 finish 时提交最新快照;
+   * 无 finish 时仅更新暂存不入 store。缺 id 或 tokens 时忽略。
    */
-  recordUsage(info: UsageInput): void {
+  recordUsage(info: UsageInput): boolean {
+    if (!info.id || !info.tokens) return false
+    if (this.committed.has(info.id)) return false
+    this.buffer.set(info.id, info)
+    if (info.finish) {
+      this.commitToStore(info)
+      this.buffer.delete(info.id)
+      this.committed.add(info.id)
+      return true
+    }
+    return false
+  }
+
+  private commitToStore(info: UsageInput): void {
     if (!info.tokens) return
     const day = todayLocal()
     const s = this.store[day] ?? newDayStats()
@@ -60,6 +78,13 @@ export class StatsCollector {
     s.cacheWrite += num(info.tokens.cache.write)
     if (typeof info.cost === "number") s.cost += info.cost
     this.store[day] = s
+  }
+
+  private drainBuffer(): void {
+    for (const info of this.buffer.values()) {
+      this.commitToStore(info)
+    }
+    this.buffer.clear()
   }
 
   /** 读取内存 store(图表工具用) */
@@ -89,10 +114,14 @@ export class StatsCollector {
   /** 停止定时器并刷盘(测试与卸载用) */
   stop(): void {
     if (this.timer) clearInterval(this.timer)
+    this.drainBuffer()
     this.flush()
   }
 
-  private onBeforeExit = () => this.flush()
+  private onBeforeExit = () => {
+    this.drainBuffer()
+    this.flush()
+  }
 }
 
 function newDayStats(): DayStats {

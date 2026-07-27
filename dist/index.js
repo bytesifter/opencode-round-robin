@@ -12489,6 +12489,8 @@ class StatsCollector {
   path;
   flushMs;
   timer;
+  buffer = new Map;
+  committed = new Set;
   constructor(path, opts = {}) {
     this.path = path;
     this.flushMs = opts.flushMs ?? DEFAULT_FLUSH_MS;
@@ -12499,6 +12501,20 @@ class StatsCollector {
     }
   }
   recordUsage(info) {
+    if (!info.id || !info.tokens)
+      return false;
+    if (this.committed.has(info.id))
+      return false;
+    this.buffer.set(info.id, info);
+    if (info.finish) {
+      this.commitToStore(info);
+      this.buffer.delete(info.id);
+      this.committed.add(info.id);
+      return true;
+    }
+    return false;
+  }
+  commitToStore(info) {
     if (!info.tokens)
       return;
     const day = todayLocal();
@@ -12512,6 +12528,12 @@ class StatsCollector {
     if (typeof info.cost === "number")
       s.cost += info.cost;
     this.store[day] = s;
+  }
+  drainBuffer() {
+    for (const info of this.buffer.values()) {
+      this.commitToStore(info);
+    }
+    this.buffer.clear();
   }
   getStore() {
     return this.store;
@@ -12534,9 +12556,13 @@ class StatsCollector {
   stop() {
     if (this.timer)
       clearInterval(this.timer);
+    this.drainBuffer();
     this.flush();
   }
-  onBeforeExit = () => this.flush();
+  onBeforeExit = () => {
+    this.drainBuffer();
+    this.flush();
+  };
 }
 function newDayStats() {
   return { req: 0, in: 0, out: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
@@ -12722,11 +12748,10 @@ var server = async (_input, options) => {
       const e = event;
       if (e.type === "message.updated" && e.properties?.info) {
         const info = e.properties.info;
-        const rawSession = e.properties.sessionID;
-        globalStats.recordUsage(info);
-        if (info.tokens) {
+        const committed = globalStats.recordUsage(info);
+        if (committed) {
           const ctx = {
-            sessionID: rawSession ? rawSession.slice(0, 8) : undefined,
+            sessionID: info.sessionID ? info.sessionID.slice(0, 8) : undefined,
             modelID: info.modelID,
             providerID: info.providerID,
             mode: info.mode,
