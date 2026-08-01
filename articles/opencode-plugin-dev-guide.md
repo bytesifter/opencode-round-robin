@@ -4,7 +4,7 @@
 
 日常用 opencode 写代码，单个 API Key 频繁触发 429 限流。手头有 6 个高级版账号（coding + plan 端点），虽然 `opencode.jsonc` 可以配多个 provider，但 `model` 一次只能指向一个，手动切换账号很繁琐，而且无法自动应对 429 限流。
 
-于是写了个插件 `opencode-round-robin`：每次请求随机选一个 provider，key 和端点一起换，429 自动熔断跳过，全部熔断时回退到 opencode 原生请求。附带按天用量统计和结构化日志。
+于是写了个插件 `opencode-round-robin`：每次请求随机选一个 provider，key 和端点一起换，429 自动熔断跳过（区分配额耗尽熔断 1 小时与请求太快熔断 1 分钟），全部熔断时回退到 opencode 原生请求。附带按天用量统计和结构化日志。
 
 完整代码：[https://github.com/bytesifter/opencode-round-robin](https://github.com/bytesifter/opencode-round-robin)（本文基于 opencode v1.18.5）
 

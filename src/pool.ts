@@ -16,11 +16,13 @@ interface CooldownEntry {
 export class ProviderPool {
   private readonly entries: ProviderEntry[]
   readonly cooldownMs: number
+  readonly quotaCooldownMs: number
   private readonly cooldowns = new Map<string, CooldownEntry>()
 
-  constructor(entries: ProviderEntry[], cooldownMs: number) {
+  constructor(entries: ProviderEntry[], cooldownMs: number, quotaCooldownMs: number = 3600000) {
     this.entries = entries
     this.cooldownMs = cooldownMs
+    this.quotaCooldownMs = quotaCooldownMs
   }
 
   /**
@@ -40,9 +42,10 @@ export class ProviderPool {
    * 标记某 provider 熔断(收到 429 后调用)。
    *
    * @param key - 被限流的 provider 的 key
+   * @param ms - 自定义冷却时长(毫秒),不传时用 pool 默认 cooldownMs
    */
-  markCooldown(key: string): void {
-    this.cooldowns.set(key, { until: Date.now() + this.cooldownMs })
+  markCooldown(key: string, ms?: number): void {
+    this.cooldowns.set(key, { until: Date.now() + (ms ?? this.cooldownMs) })
   }
 
   /**

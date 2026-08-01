@@ -100,3 +100,11 @@ test("findBaseURL 返回匹配的 baseURL", () => {
   expect(pool.findBaseURL("https://host/plan/v3/chat/completions")).toBe("https://host/plan/v3")
   expect(pool.findBaseURL("https://other.example/api")).toBeNull()
 })
+
+test("markCooldown(key, ms) 自定义时长覆盖默认 cooldownMs", async () => {
+  const pool = new ProviderPool(makeEntries(2), 60000)
+  pool.markCooldown("k1", 50)
+  expect(pool.isCoolingDown("k1")).toBe(true)
+  await new Promise((r) => setTimeout(r, 70))
+  expect(pool.isCoolingDown("k1")).toBe(false)
+})

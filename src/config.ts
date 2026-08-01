@@ -1,7 +1,10 @@
 import type { ParsedOptions, ProviderEntry } from "./types"
 
-/** 默认冷却时长(毫秒),429 限流后该 provider 暂时停用 */
+/** 默认冷却时长(毫秒),请求太快 429 后该 provider 暂时停用 */
 const DEFAULT_COOLDOWN_MS = 60000
+
+/** 默认配额耗尽冷却时长(毫秒),配额用完后该 provider 长时间停用 */
+const DEFAULT_QUOTA_COOLDOWN_MS = 3600000
 
 /**
  * 解析插件 options:只校验 providers(必填非空)与可选项。
@@ -28,6 +31,8 @@ export function parseOptions(options: Record<string, unknown> | undefined): Pars
   return {
     providers,
     cooldownMs: typeof options.cooldownMs === "number" ? options.cooldownMs : DEFAULT_COOLDOWN_MS,
+    quotaCooldownMs:
+      typeof options.quotaCooldownMs === "number" ? options.quotaCooldownMs : DEFAULT_QUOTA_COOLDOWN_MS,
     statsPath: typeof options.statsPath === "string" ? options.statsPath : undefined,
     logPath: typeof options.logPath === "string" ? options.logPath : undefined,
     logDir: typeof options.logDir === "string" ? options.logDir : undefined,

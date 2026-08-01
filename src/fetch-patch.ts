@@ -1,12 +1,21 @@
 import type { ProviderPool } from "./pool"
 import type { ProviderEntry } from "./types"
 
+/** 429 冷却类型 */
+export type CooldownType = "rate-limit" | "quota-exhausted"
+
 /**
  * fetch-patch 的回调,用于日志等副作用。
  */
 export interface FetchPatchCallbacks {
   /** 收到响应后触发(429 已标记 cooldown 之后),含 provider 信息与耗时 */
-  onResponse?: (pool: ProviderPool, entry: ProviderEntry, status: number, durationMs: number) => void
+  onResponse?: (
+    pool: ProviderPool,
+    entry: ProviderEntry,
+    status: number,
+    durationMs: number,
+    cooldownType?: CooldownType,
+  ) => void
 }
 
 /** 429 状态码:Too Many Requests,触发该 provider 熔断 */
@@ -46,10 +55,13 @@ export function patchFetch(pool: ProviderPool, callbacks?: FetchPatchCallbacks):
     const startMs = Date.now()
     const response = await origFetch(newUrl, { ...init, headers })
     const durationMs = Date.now() - startMs
+    let cooldownType: CooldownType | undefined
     if (response.status === HTTP_TOO_MANY_REQUESTS) {
-      pool.markCooldown(entry.key)
+      cooldownType = await classify429(response)
+      const ms = cooldownType === "quota-exhausted" ? pool.quotaCooldownMs : pool.cooldownMs
+      pool.markCooldown(entry.key, ms)
     }
-    callbacks?.onResponse?.(pool, entry, response.status, durationMs)
+    callbacks?.onResponse?.(pool, entry, response.status, durationMs, cooldownType)
     return response
   }
   const origPreconnect = (origFetch as unknown as { preconnect?: (url: string | URL) => void }).preconnect
@@ -70,4 +82,27 @@ function resolveUrl(input: RequestInfo | URL): string {
   if (typeof input === "string") return input
   if (input instanceof URL) return input.href
   return input.url
+}
+
+/**
+ * 读取 429 响应体判断冷却类型。
+ *
+ * - error.message 含 exceeded + quota -> quota-exhausted(配额耗尽)
+ * - 其他(含解析失败) -> rate-limit(请求太快)
+ *
+ * 使用 response.clone() 读取副本,不消费原始 body。
+ */
+async function classify429(response: Response): Promise<CooldownType> {
+  try {
+    const clone = response.clone()
+    const body = await clone.text()
+    const parsed = JSON.parse(body)
+    const message = String(parsed?.error?.message ?? "").toLowerCase()
+    if (message.includes("exceeded") && message.includes("quota")) {
+      return "quota-exhausted"
+    }
+  } catch {
+    // 响应体不可读或非 JSON,fallback 到 rate-limit
+  }
+  return "rate-limit"
 }

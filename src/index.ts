@@ -12,9 +12,6 @@ import type { EventContext } from "./types"
 /** 图表默认展示天数 */
 const DEFAULT_CHART_DAYS = 7
 
-/** HTTP 429 状态码 */
-const HTTP_TOO_MANY_REQUESTS = 429
-
 let globalStats: StatsCollector | null = null
 let globalLogger: Logger | null = null
 let globalPool: ProviderPool | null = null
@@ -47,14 +44,15 @@ const server: Plugin = async (_input, options) => {
         config as unknown as { provider?: Record<string, { options?: { apiKey?: string; baseURL?: string } }> },
         opts.providers,
       )
-      globalPool = new ProviderPool(entries, opts.cooldownMs)
+      globalPool = new ProviderPool(entries, opts.cooldownMs, opts.quotaCooldownMs)
       patchFetch(globalPool, {
-        onResponse: (pool, entry, status, durationMs) => {
+        onResponse: (pool, entry, status, durationMs, cooldownType) => {
           const idx = pool.keyIndex(entry.key)
           const account = entry.account
           globalLogger!.logFetch(account, idx, tail(entry.key), status, durationMs)
-          if (status === HTTP_TOO_MANY_REQUESTS) {
-            globalLogger!.logCooldown(account, idx, tail(entry.key), pool.cooldownMs)
+          if (cooldownType) {
+            const ms = cooldownType === "quota-exhausted" ? pool.quotaCooldownMs : pool.cooldownMs
+            globalLogger!.logCooldown(account, idx, tail(entry.key), cooldownType, ms)
           }
         },
       })

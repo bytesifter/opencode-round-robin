@@ -143,3 +143,69 @@ test("unpatch 恢复原始 fetch", async () => {
 
   expect(globalThis.fetch).toBe(mockFetch)
 })
+
+test("配额耗尽 429 触发 quotaCooldownMs 熔断", async () => {
+  const pool = new ProviderPool(codingEntries, 60000, 3600000)
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        error: {
+          message: "You have exceeded the monthly usage quota. It will reset at 2026-08-05.",
+        },
+      }),
+      { status: 429, headers: { "Content-Type": "application/json" } },
+    )) as unknown as typeof globalThis.fetch
+
+  const types: string[] = []
+  const unpatch = patchFetch(pool, {
+    onResponse: (_pool, _entry, _status, _duration, cooldownType) => {
+      if (cooldownType) types.push(cooldownType)
+    },
+  })
+  await fetch("https://x.example/coding/v3/chat/completions", {})
+  unpatch()
+
+  expect(types).toContain("quota-exhausted")
+  expect(pool.isCoolingDown("k1") || pool.isCoolingDown("k2")).toBe(true)
+})
+
+test("请求太快 429 触发 cooldownMs 熔断", async () => {
+  const pool = new ProviderPool(codingEntries, 60000, 3600000)
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        error: {
+          message: "Requests are too frequent. Please reduce your request frequency.",
+        },
+      }),
+      { status: 429, headers: { "Content-Type": "application/json" } },
+    )) as unknown as typeof globalThis.fetch
+
+  const types: string[] = []
+  const unpatch = patchFetch(pool, {
+    onResponse: (_pool, _entry, _status, _duration, cooldownType) => {
+      if (cooldownType) types.push(cooldownType)
+    },
+  })
+  await fetch("https://x.example/coding/v3/chat/completions", {})
+  unpatch()
+
+  expect(types).toContain("rate-limit")
+  expect(pool.isCoolingDown("k1") || pool.isCoolingDown("k2")).toBe(true)
+})
+
+test("响应体非 JSON 的 429 fallback 到 rate-limit", async () => {
+  const pool = new ProviderPool(codingEntries, 60000, 3600000)
+  globalThis.fetch = (async () => new Response("rate limited", { status: 429 })) as unknown as typeof globalThis.fetch
+
+  const types: string[] = []
+  const unpatch = patchFetch(pool, {
+    onResponse: (_pool, _entry, _status, _duration, cooldownType) => {
+      if (cooldownType) types.push(cooldownType)
+    },
+  })
+  await fetch("https://x.example/coding/v3/chat/completions", {})
+  unpatch()
+
+  expect(types).toContain("rate-limit")
+})

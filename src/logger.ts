@@ -58,10 +58,17 @@ export class Logger {
    * @param accountName - 账号名
    * @param keyIndex - key 序号
    * @param keyTail - key 末 4 位(已脱敏)
+   * @param type - 冷却类型(rate-limit / quota-exhausted)
    * @param cooldownMs - 冷却时长(毫秒)
    */
-  logCooldown(accountName: string, keyIndex: number, keyTail: string, cooldownMs: number): void {
-    const line = `${nowStr()} WARN  cooldown provider=${accountName} key=#${keyIndex}(${keyTail}) ${cooldownMs}ms\n`
+  logCooldown(
+    accountName: string,
+    keyIndex: number,
+    keyTail: string,
+    type: "rate-limit" | "quota-exhausted",
+    cooldownMs: number,
+  ): void {
+    const line = `${nowStr()} WARN  cooldown provider=${accountName} key=#${keyIndex}(${keyTail}) ${type} ${cooldownMs}ms\n`
     this.write(line)
   }
 

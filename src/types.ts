@@ -4,8 +4,10 @@
 export interface ParsedOptions {
   /** 参与轮询的 provider 名(账号名)列表,必填非空 */
   providers: string[]
-  /** 全局冷却时长(毫秒) */
+  /** 全局冷却时长(毫秒),请求太快 429 时生效 */
   cooldownMs: number
+  /** 配额耗尽 429 时的冷却时长(毫秒) */
+  quotaCooldownMs: number
   /** 统计文件路径(可选,覆盖默认) */
   statsPath?: string
   /** 日志文件路径(可选,覆盖默认,单文件不轮转) */

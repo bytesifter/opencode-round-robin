@@ -12339,6 +12339,7 @@ import { join as join2 } from "node:path";
 
 // src/config.ts
 var DEFAULT_COOLDOWN_MS = 60000;
+var DEFAULT_QUOTA_COOLDOWN_MS = 3600000;
 function parseOptions(options) {
   if (!options) {
     throw new Error("opencode-round-robin: 缺少 options");
@@ -12357,6 +12358,7 @@ function parseOptions(options) {
   return {
     providers,
     cooldownMs: typeof options.cooldownMs === "number" ? options.cooldownMs : DEFAULT_COOLDOWN_MS,
+    quotaCooldownMs: typeof options.quotaCooldownMs === "number" ? options.quotaCooldownMs : DEFAULT_QUOTA_COOLDOWN_MS,
     statsPath: typeof options.statsPath === "string" ? options.statsPath : undefined,
     logPath: typeof options.logPath === "string" ? options.logPath : undefined,
     logDir: typeof options.logDir === "string" ? options.logDir : undefined
@@ -12394,10 +12396,12 @@ function collectProviders(config2, providers) {
 class ProviderPool {
   entries;
   cooldownMs;
+  quotaCooldownMs;
   cooldowns = new Map;
-  constructor(entries, cooldownMs) {
+  constructor(entries, cooldownMs, quotaCooldownMs = 3600000) {
     this.entries = entries;
     this.cooldownMs = cooldownMs;
+    this.quotaCooldownMs = quotaCooldownMs;
   }
   next() {
     const now = Date.now();
@@ -12407,8 +12411,8 @@ class ProviderPool {
     const idx = Math.floor(Math.random() * available.length);
     return available[idx];
   }
-  markCooldown(key) {
-    this.cooldowns.set(key, { until: Date.now() + this.cooldownMs });
+  markCooldown(key, ms) {
+    this.cooldowns.set(key, { until: Date.now() + (ms ?? this.cooldownMs) });
   }
   isCoolingDown(key, now = Date.now()) {
     const entry = this.cooldowns.get(key);
@@ -12456,10 +12460,13 @@ function patchFetch(pool, callbacks) {
     const startMs = Date.now();
     const response = await origFetch(newUrl, { ...init, headers });
     const durationMs = Date.now() - startMs;
+    let cooldownType;
     if (response.status === HTTP_TOO_MANY_REQUESTS) {
-      pool.markCooldown(entry.key);
+      cooldownType = await classify429(response);
+      const ms = cooldownType === "quota-exhausted" ? pool.quotaCooldownMs : pool.cooldownMs;
+      pool.markCooldown(entry.key, ms);
     }
-    callbacks?.onResponse?.(pool, entry, response.status, durationMs);
+    callbacks?.onResponse?.(pool, entry, response.status, durationMs, cooldownType);
     return response;
   };
   const origPreconnect = origFetch.preconnect;
@@ -12477,6 +12484,18 @@ function resolveUrl(input) {
   if (input instanceof URL)
     return input.href;
   return input.url;
+}
+async function classify429(response) {
+  try {
+    const clone2 = response.clone();
+    const body = await clone2.text();
+    const parsed = JSON.parse(body);
+    const message = String(parsed?.error?.message ?? "").toLowerCase();
+    if (message.includes("exceeded") && message.includes("quota")) {
+      return "quota-exhausted";
+    }
+  } catch {}
+  return "rate-limit";
 }
 
 // src/stats.ts
@@ -12645,8 +12664,8 @@ class Logger {
 `;
     this.write(line);
   }
-  logCooldown(accountName, keyIndex, keyTail, cooldownMs) {
-    const line = `${nowStr()} WARN  cooldown provider=${accountName} key=#${keyIndex}(${keyTail}) ${cooldownMs}ms
+  logCooldown(accountName, keyIndex, keyTail, type, cooldownMs) {
+    const line = `${nowStr()} WARN  cooldown provider=${accountName} key=#${keyIndex}(${keyTail}) ${type} ${cooldownMs}ms
 `;
     this.write(line);
   }
@@ -12709,7 +12728,6 @@ function todayLocal2() {
 
 // src/index.ts
 var DEFAULT_CHART_DAYS = 7;
-var HTTP_TOO_MANY_REQUESTS2 = 429;
 var globalStats = null;
 var globalLogger = null;
 var globalPool = null;
@@ -12731,14 +12749,15 @@ var server = async (_input, options) => {
       if (fetchPatched)
         return;
       const entries = collectProviders(config2, opts.providers);
-      globalPool = new ProviderPool(entries, opts.cooldownMs);
+      globalPool = new ProviderPool(entries, opts.cooldownMs, opts.quotaCooldownMs);
       patchFetch(globalPool, {
-        onResponse: (pool, entry, status, durationMs) => {
+        onResponse: (pool, entry, status, durationMs, cooldownType) => {
           const idx = pool.keyIndex(entry.key);
           const account = entry.account;
           globalLogger.logFetch(account, idx, tail(entry.key), status, durationMs);
-          if (status === HTTP_TOO_MANY_REQUESTS2) {
-            globalLogger.logCooldown(account, idx, tail(entry.key), pool.cooldownMs);
+          if (cooldownType) {
+            const ms = cooldownType === "quota-exhausted" ? pool.quotaCooldownMs : pool.cooldownMs;
+            globalLogger.logCooldown(account, idx, tail(entry.key), cooldownType, ms);
           }
         }
       });

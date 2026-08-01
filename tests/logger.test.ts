@@ -61,13 +61,25 @@ test("日志级别:200=INFO, 429=WARN, 500=ERROR", () => {
 
 test("429 冷却日志含账号名/WARN 级别", () => {
   const l = new Logger(logPath)
-  l.logCooldown("volxc9208", 0, "..2898", 60000)
+  l.logCooldown("volxc9208", 0, "..2898", "rate-limit", 60000)
   const content = readFileSync(logPath, "utf8")
   expect(content).toContain("cooldown")
   expect(content).toContain("60000")
   expect(content).toContain("volxc9208")
   expect(content).toContain("2898")
   expect(content).toContain("WARN")
+})
+
+test("冷却日志区分 rate-limit 与 quota-exhausted 类型", () => {
+  const l = new Logger(logPath)
+  l.logCooldown("account-a", 0, "..2898", "rate-limit", 60000)
+  l.logCooldown("account-b", 1, "..2a5b", "quota-exhausted", 3600000)
+  const content = readFileSync(logPath, "utf8")
+  const lines = content.trim().split("\n")
+  expect(lines[0]).toContain("rate-limit")
+  expect(lines[0]).toContain("60000")
+  expect(lines[1]).toContain("quota-exhausted")
+  expect(lines[1]).toContain("3600000")
 })
 
 test("event 层日志含各分量/cost/业务上下文", () => {
